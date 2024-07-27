@@ -1,40 +1,32 @@
-// Analog
+#include <HCSR04.h>
+#include <Wire.h>
 
-int Messwert = 0;
+UltraSonicDistanceSensor distanceSensor(2, 4);
 
-void setup(){
-  Serial.begin(9600);
+byte i2c_rcv;               // data received from I2C bus
+unsigned long time_start;   // start time in milliseconds
+int stat_LED;               // status of LED: 1 = ON, 0 = OFF
+byte value_pot;             // potentiometer position
+
+void setup () {
+    Serial.begin(9600);
+    Wire.begin(); 
 }
 
-void loop() {
-  Messwert = analogRead(A0);
+void loop () {
+    float distance = distanceSensor.measureDistanceCm();
+    Serial.println(distance);
 
-  Serial.print("Feuchtigkeits-Messwert:");
-  Serial.println(Messwert);
+    byte floatBytes[sizeof(float)];
+    memcpy(floatBytes, &distance, sizeof(float));
 
-  delay(1000);
+    Wire.beginTransmission(8);
+    Wire.write(floatBytes, sizeof(float)); 
+    Wire.endTransmission();
+    delay(500);
+
+
+
+
+
 }
-
-/*
-// Digital
-
-int sensorPin = 7;
-int sensorValue = 0;
-
-void setup() {
-  pinMode(sensorPin, INPUT); // Setzt den Pin als Eingang
-  Serial.begin(9600); // Startet die serielle Kommunikation
-}
-
-void loop() {
-  sensorValue = digitalRead(sensorPin); // Liest den Wert vom Sensor
-  
-  if (sensorValue == HIGH) {
-    Serial.println("Trocken");
-  } else {
-    Serial.println("Feucht");
-  }
-  
-  delay(1000); // Warte 1 Sekunde vor dem nächsten Auslesen
-}
-*/
