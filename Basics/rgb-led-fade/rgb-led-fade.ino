@@ -2,8 +2,8 @@
 
 // ---------------------------------------- Events
 
-int fade_evt = 0;
-int blink_evt = 0;
+volatile int fade_evt = 0;
+volatile int btn_evt = 0;
 
 // ---------------------------------------- Pinlayout
 
@@ -19,24 +19,17 @@ int BTN_pin = 2;
 
 // ---------------------------------------- RGB fade variables
 
-int r = 255;
-int g = 0;
-int b = 0;
+volatile int r1 = 255, g1 = 0, b1 = 0;
+//volatile int r2 = 0, g2 = 0, b2 = 255;
 
-int fade_cnt = 0;
-
-// ---------------------------------------- RGB blink variables
-
-int blink_state = 0;
-
-int rgb_pins[] = {LEDrot_1, LEDgruen_1, LEDblau_1, LEDrot_2, LEDgruen_2, LEDblau_2};
-int red = 0;
-int green = 1;
-int blue = 2;
 
 // ---------------------------------------- RGB LED Routine Counter
 
-int counter = 0;
+int btn_counter = 0;
+
+// ---------------------------------------- Debugging Variables
+
+static unsigned long lastInterrupt2Time = 0;
 
 // ---------------------------------------- Timer Initialisation
 
@@ -57,7 +50,7 @@ void setupTimer2() {
   TCCR2B = 0;                 // Reset entire TCCR1B to 0
   TCCR2B |= B00000111;        // Set CS20, CS21 and CS22 to 1 so we get prescalar 1024
   TIMSK2 |= B00000100;        // Set OCIE1B to 1 so we enable compare match B
-  OCR2B = 1;                // Finally we set compare register B to this value
+  OCR2B = 255;                // Finally we set compare register B to this value
 }
 
 void updateTimer2Interval(unsigned long interval_ms) {
@@ -69,7 +62,7 @@ void updateTimer2Interval(unsigned long interval_ms) {
   }
 
   TIMSK1 &= ~B00000010;
-  OCR1A = ocr2b_value;
+  OCR2B = ocr2b_value;
   TIMSK1 |= B00000010;
 }
 
@@ -77,8 +70,8 @@ void setup() {
 
   cli(); // noInterrupts Makro
 
-  CLKPR = 0x80; // Enable Clock Prescaler Change by setting CLKPCE bit to 1 and every other to 0
-  CLKPR = 0x03; // Set Clock Prescaler to Clock Division Factor 8 (16MHz / 8 = 2MHz)
+  //CLKPR = 0x80; // Enable Clock Prescaler Change by setting CLKPCE bit to 1 and every other to 0
+  //CLKPR = 0x03; // Set Clock Prescaler to Clock Division Factor 8 (16MHz / 8 = 2MHz)
   
   pinMode(LEDblau_1, OUTPUT);
   pinMode(LEDgruen_1, OUTPUT);
@@ -91,12 +84,13 @@ void setup() {
   pinMode(BTN_pin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(BTN_pin), button_ISR, FALLING);
 
-  setupTimer1();
-  //setupTimer2();
+  //setupTimer1();
+  setupTimer2();
 
-  Serial.begin(76800);
+  //Serial.begin(76800);
+  Serial.begin(9600);
 
-  disable_Timer1_ISR();
+  //disable_Timer_ISR();
   
   sei(); // interrupts Makro
 }
@@ -105,14 +99,43 @@ void setup() {
 
 void loop() {
 
-  while (counter == 0) {
-    RGB_fade();
-  }
+  if (fade_evt == 1 && btn_counter == 0) { 
+    /*
+    unsigned long interrupt2Time = millis();
+    Serial.println(interrupt2Time - lastInterrupt2Time);
+    lastInterrupt2Time = interrupt2Time;
+    */
+    
+    Serial.println(String(r1) + " " + String(g1) + " " + String(b1));
+    //Serial.println(String(r2) + " " + String(g2) + " " + String(b2));
+    //Serial.print("\n");
+    
 
-  while (counter == 1) {
-    RGB_blink();
-  }
+    fade_evt = 0; // Reset the flag
 
+    // Update LED 1
+    analogWrite(LEDrot_1, r1);
+    analogWrite(LEDrot_2, r1);
+
+    analogWrite(LEDgruen_1, g1);
+    analogWrite(LEDgruen_2, g1);
+
+    analogWrite(LEDblau_1, b1);
+    analogWrite(LEDblau_2, b1);
+  }
+  
+  if (btn_evt == 1) {
+    btn_evt = 0;
+    Serial.println("Button pressed");
+
+    if (btn_counter != 0) {
+      disable_Timer_ISR();
+    } else {
+      enable_Timer_ISR();
+    }
+      
+    setLEDColor(btn_counter);
+  }
 }
 
 // ---------------------------------------- Button ISR
@@ -121,25 +144,12 @@ void button_ISR() {
   static unsigned long lastInterruptTime = 0;
   unsigned long interruptTime = millis();
 
-  if (interruptTime - lastInterruptTime > 200) {
-    counter++;
-    counter = counter % 5;
-    Serial.print("Setting LED to: ");
-    Serial.print(counter);
-    Serial.print("\n");
+  if ((interruptTime - lastInterruptTime) > 50) {
+    btn_counter++;
+    btn_counter = btn_counter % 4;
+    btn_evt = 1;
   }
   lastInterruptTime = interruptTime;
-
-  if (counter == 1) {
-    enable_Timer1_ISR();
-  } else if (counter == 2) {
-    disable_Timer1_ISR();
-    set_color(red);
-  } else if (counter == 3) {
-    set_color(green);
-  } else if (counter == 4) {
-    set_color(blue);
-  }  
 }
 
 // ---------------------------------------- Timer ISR
@@ -148,107 +158,71 @@ void button_ISR() {
 ISR(TIMER1_COMPA_vect){
   TCNT1  = 0;                  //First, set the timer back to 0 so it resets for next interrupt
 
-  blink_state += 1;
-  blink_state = blink_state % 3;
 }
 
 // IRS Timer 2 trigger each ~10ms.
 ISR(TIMER2_COMPB_vect){   
-  
+  static int phase = 0; // Track the phase of the fade
+  phase = (phase + 1) % 765; // 765 = 3 * 255 (cycle length for all fades)
+
+  // LED 1 (normal phase)
+  if (phase < 255) { 
+    r1 = 255 - phase; g1 = phase; b1 = 0; 
+  } else if (phase < 510) { 
+    r1 = 0; g1 = 510 - phase; b1 = phase - 255; 
+  } else { 
+    r1 = phase - 510; g1 = 0; b1 = 765 - phase; 
+  }
+
+  /*
+  // LED 2 (offset phase)
+  int offsetPhase = (phase + 255) % 765; // Offset by 255
+  if (offsetPhase < 255) { 
+    r2 = 255 - offsetPhase; g2 = offsetPhase; b2 = 0; 
+  } else if (offsetPhase < 510) { 
+    r2 = 0; g2 = 510 - offsetPhase; b2 = offsetPhase - 255; 
+  } else { 
+    r2 = offsetPhase - 510; g2 = 0; b2 = 765 - offsetPhase; 
+  }
+  */
+
+  fade_evt = 1; // Signal that the fade is complete
 }
+
 
 // ---------------------------------------- RGB LED Routines
 
-void RGB_fade(){
-  for (; r>=0, b<255; b++, r--) {
-    analogWrite(LEDrot_1, r);
-    analogWrite(LEDblau_1, b);
-    
-    analogWrite(LEDblau_2, r);
-    analogWrite(LEDgruen_2, b);
-    delay(10);
-  }
+void setLEDColor(int color) {
+  switch (color) {
+    case 1: // Red
+      analogWrite(LEDrot_1, 255); analogWrite(LEDgruen_1, 0); analogWrite(LEDblau_1, 0);
+      analogWrite(LEDrot_2, 255); analogWrite(LEDgruen_2, 0); analogWrite(LEDblau_2, 0);
+      break;
 
-  for (; b>=0, g<255; g++, b--) {
-    analogWrite(LEDblau_1, b);
-    analogWrite(LEDgruen_1, g);
-    
-    analogWrite(LEDgruen_2, b);
-    analogWrite(LEDrot_2, g);
-    delay(10);
-  }
+    case 2: // Green
+      analogWrite(LEDrot_1, 0); analogWrite(LEDgruen_1, 255); analogWrite(LEDblau_1, 0);
+      analogWrite(LEDrot_2, 0); analogWrite(LEDgruen_2, 255); analogWrite(LEDblau_2, 0);
+      break;
 
-  for (; g>=0, r<255; r++, g--) {
-    analogWrite(LEDrot_1, r);
-    analogWrite(LEDgruen_1, g);
-        
-    analogWrite(LEDrot_2, r);
-    analogWrite(LEDblau_2, g);
-    delay(10);
-  } 
-}
-
-void RGB_blink() {
-  if (blink_state == 0) {
-    digitalWrite(LEDrot_1, 1);
-    digitalWrite(LEDgruen_1, 0);
-    digitalWrite(LEDblau_1, 0);
-
-    digitalWrite(LEDrot_2, 0);
-    digitalWrite(LEDgruen_2, 1);
-    digitalWrite(LEDblau_2, 0);
-  } else if (blink_state == 1) {
-    digitalWrite(LEDrot_1, 0);
-    digitalWrite(LEDgruen_1, 1);
-    digitalWrite(LEDblau_1, 0);
-
-    digitalWrite(LEDrot_2, 0);
-    digitalWrite(LEDgruen_2, 0);
-    digitalWrite(LEDblau_2, 1);
-  } else if (blink_state == 2) {
-    digitalWrite(LEDrot_1, 0);
-    digitalWrite(LEDgruen_1, 0);
-    digitalWrite(LEDblau_1, 1);
-
-    digitalWrite(LEDrot_2, 1);
-    digitalWrite(LEDgruen_2, 0);
-    digitalWrite(LEDblau_2, 0);
-  }
-}
-    
-void set_color(int idx){  
-  Serial.print("Changed color");
-  Serial.print("\n");
-  for (int i = 0; i <= 2; i++){
-    if (i == idx){
-      digitalWrite(rgb_pins[idx], 1);
-      digitalWrite(rgb_pins[idx + 3], 1);
-    } else {
-      digitalWrite(rgb_pins[i], 0);
-      digitalWrite(rgb_pins[i + 3], 0);
-    }
+    case 3: // Blue
+      analogWrite(LEDrot_1, 0); analogWrite(LEDgruen_1, 0); analogWrite(LEDblau_1, 255);
+      analogWrite(LEDrot_2, 0); analogWrite(LEDgruen_2, 0); analogWrite(LEDblau_2, 255);
+      break;
+    default: // Turn off LEDs
+      analogWrite(LEDrot_1, 0); analogWrite(LEDgruen_1, 0); analogWrite(LEDblau_1, 0);
+      analogWrite(LEDrot_2, 0); analogWrite(LEDgruen_2, 0); analogWrite(LEDblau_2, 0);
+      break;
   }
 }
 
-void reset_LEDs(){
-    digitalWrite(LEDrot_1, 0);
-    digitalWrite(LEDgruen_1, 0);
-    digitalWrite(LEDblau_1, 1);
-
-    digitalWrite(LEDrot_2, 1);
-    digitalWrite(LEDgruen_2, 0);
-    digitalWrite(LEDblau_2, 0);
-    Serial.print("RGB LEDs Resetted!\n");
+void disable_Timer_ISR() {
+    //TCCR1B = B00000000;
+    TCCR2B = B00000000;
+    Serial.print("Timer disabled!\n");
 }
 
-void disable_Timer1_ISR() {
-    TCCR1B = B00000000;
-    //TCCR2B = B00000000;
-    Serial.print("Timer 1 disabled!\n");
-}
-
-void enable_Timer1_ISR() {
-    TCCR1B = B00000111;
-    //TCCR2B = B00000111;
-    Serial.print("Timer 1 enabled!\n");
+void enable_Timer_ISR() {
+    //TCCR1B = B00000111;
+    TCCR2B = B00000111;
+    Serial.print("Timer enabled!\n");
 }
