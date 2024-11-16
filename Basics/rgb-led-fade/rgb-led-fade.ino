@@ -37,8 +37,12 @@ bool timerActive = false;
 
 // ---------------------------------------- Timer Initialisation
 
+void setupTimer0() { // Uses delay(), millis(), micros(), analogWrite() pins 5, 6
+
+}
+
 // 16-Bit Timer
-void setupTimer1() {
+void setupTimer1() { // Uses Servo functions, analogWrite() pins 9, 10
   //Timer 1 (interrupt each ~1s)
   TCCR1A = 0;                 // Reset entire TCCR1A to 0
   TCCR1B = 0;                 // Reset entire TCCR1B to 0
@@ -48,7 +52,7 @@ void setupTimer1() {
 }
 
 // 8-Bit Timer
-void setupTimer2() {
+void setupTimer2() { // Uses tone(), analogWrite() pins 3, 11
   // interrupt time = 1/(2Mhz/1024) * 255 =  10.24ms;
   TCCR2A = 0;                 // Reset entire TCCR1A to 0
   TCCR2B = 0;                 // Reset entire TCCR1B to 0
