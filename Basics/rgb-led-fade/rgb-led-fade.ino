@@ -1,9 +1,11 @@
 #include <avr/sleep.h>
+#include <LowPower.h>
 
 // ---------------------------------------- Events
 
-volatile int fade_evt = 0;
-volatile int btn_evt = 0;
+volatile bool fade_evt = false;
+volatile bool btn_evt = false;
+volatile bool sleep_evt = false;
 
 // ---------------------------------------- Pinlayout
 
@@ -20,16 +22,18 @@ int BTN_pin = 2;
 // ---------------------------------------- RGB fade variables
 
 volatile int r1 = 255, g1 = 0, b1 = 0;
-//volatile int r2 = 0, g2 = 0, b2 = 255;
+volatile int r2 = 0, g2 = 0, b2 = 255;
 
 
 // ---------------------------------------- RGB LED Routine Counter
 
 int btn_counter = 0;
 
-// ---------------------------------------- Debugging Variables
+// ---------------------------------------- Sleep Timer Variables
 
-static unsigned long lastInterrupt2Time = 0;
+unsigned long startTime = 0;
+unsigned long interval = 0;
+bool timerActive = false;
 
 // ---------------------------------------- Timer Initialisation
 
@@ -85,7 +89,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(BTN_pin), button_ISR, FALLING);
 
   //setupTimer1();
-  setupTimer2();
+  //setupTimer2();
 
   //Serial.begin(76800);
   Serial.begin(9600);
@@ -99,42 +103,61 @@ void setup() {
 
 void loop() {
 
-  if (fade_evt == 1 && btn_counter == 0) { 
-    /*
-    unsigned long interrupt2Time = millis();
-    Serial.println(interrupt2Time - lastInterrupt2Time);
-    lastInterrupt2Time = interrupt2Time;
-    */
-    
-    Serial.println(String(r1) + " " + String(g1) + " " + String(b1));
-    //Serial.println(String(r2) + " " + String(g2) + " " + String(b2));
-    //Serial.print("\n");
-    
+  if (timerActive) {
+    if (millis() - startTime >= interval) {
+      sleep_evt = true;
+      timerActive = false;
+      Serial.println("Timer elapsed, sleep_evt set to 1");
+    }
+  }
 
-    fade_evt = 0; // Reset the flag
+  if (sleep_evt == false) {
+    increase_fade();
+  } else {
+    LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+  }
 
-    // Update LED 1
+  if (fade_evt) { 
+    fade_evt = false; // Reset the flag
+
+    // Update LEDs
     analogWrite(LEDrot_1, r1);
-    analogWrite(LEDrot_2, r1);
+    analogWrite(LEDrot_2, r2);
 
     analogWrite(LEDgruen_1, g1);
-    analogWrite(LEDgruen_2, g1);
+    analogWrite(LEDgruen_2, g2);
 
     analogWrite(LEDblau_1, b1);
-    analogWrite(LEDblau_2, b1);
+    analogWrite(LEDblau_2, b2);
   }
   
-  if (btn_evt == 1) {
-    btn_evt = 0;
+  if (btn_evt) {
+    btn_evt = false;
     Serial.println("Button pressed");
-
-    if (btn_counter != 0) {
-      disable_Timer_ISR();
-    } else {
-      enable_Timer_ISR();
-    }
-      
     setLEDColor(btn_counter);
+    delay(1000);
+
+    switch (btn_counter) {
+      case 1:
+        startSleepTimer(30);
+        break;
+            
+      case 2:
+        startSleepTimer(60);
+        break;
+            
+      case 3:
+        startSleepTimer(120);
+        break;
+
+      case 4:
+        startSleepTimer(0);
+        break;
+            
+      default:
+        stopSleepTimer();
+        break;
+    }
   }
 }
 
@@ -144,11 +167,12 @@ void button_ISR() {
   static unsigned long lastInterruptTime = 0;
   unsigned long interruptTime = millis();
 
-  if ((interruptTime - lastInterruptTime) > 50) {
+  if ((interruptTime - lastInterruptTime) > 100) {
     btn_counter++;
-    btn_counter = btn_counter % 4;
-    btn_evt = 1;
+    btn_counter = btn_counter % 5;
+    btn_evt = true;
   }
+
   lastInterruptTime = interruptTime;
 }
 
@@ -174,7 +198,6 @@ ISR(TIMER2_COMPB_vect){
     r1 = phase - 510; g1 = 0; b1 = 765 - phase; 
   }
 
-  /*
   // LED 2 (offset phase)
   int offsetPhase = (phase + 255) % 765; // Offset by 255
   if (offsetPhase < 255) { 
@@ -184,35 +207,8 @@ ISR(TIMER2_COMPB_vect){
   } else { 
     r2 = offsetPhase - 510; g2 = 0; b2 = 765 - offsetPhase; 
   }
-  */
 
-  fade_evt = 1; // Signal that the fade is complete
-}
-
-
-// ---------------------------------------- RGB LED Routines
-
-void setLEDColor(int color) {
-  switch (color) {
-    case 1: // Red
-      analogWrite(LEDrot_1, 255); analogWrite(LEDgruen_1, 0); analogWrite(LEDblau_1, 0);
-      analogWrite(LEDrot_2, 255); analogWrite(LEDgruen_2, 0); analogWrite(LEDblau_2, 0);
-      break;
-
-    case 2: // Green
-      analogWrite(LEDrot_1, 0); analogWrite(LEDgruen_1, 255); analogWrite(LEDblau_1, 0);
-      analogWrite(LEDrot_2, 0); analogWrite(LEDgruen_2, 255); analogWrite(LEDblau_2, 0);
-      break;
-
-    case 3: // Blue
-      analogWrite(LEDrot_1, 0); analogWrite(LEDgruen_1, 0); analogWrite(LEDblau_1, 255);
-      analogWrite(LEDrot_2, 0); analogWrite(LEDgruen_2, 0); analogWrite(LEDblau_2, 255);
-      break;
-    default: // Turn off LEDs
-      analogWrite(LEDrot_1, 0); analogWrite(LEDgruen_1, 0); analogWrite(LEDblau_1, 0);
-      analogWrite(LEDrot_2, 0); analogWrite(LEDgruen_2, 0); analogWrite(LEDblau_2, 0);
-      break;
-  }
+  fade_evt = true; // Signal that the fade is complete
 }
 
 void disable_Timer_ISR() {
@@ -225,4 +221,74 @@ void enable_Timer_ISR() {
     //TCCR1B = B00000111;
     TCCR2B = B00000111;
     Serial.print("Timer enabled!\n");
+}
+
+// ---------------------------------------- RGB LED Routines
+
+void increase_fade()  {
+  static int phase = 0; // Track the phase of the fade
+  phase = (phase + 1) % 765; // 765 = 3 * 255 (cycle length for all fades)
+
+  // LED 1 (normal phase)
+  if (phase < 255) { 
+    r1 = 255 - phase; g1 = phase; b1 = 0; 
+  } else if (phase < 510) { 
+    r1 = 0; g1 = 510 - phase; b1 = phase - 255; 
+  } else { 
+    r1 = phase - 510; g1 = 0; b1 = 765 - phase; 
+  }
+
+  // LED 2 (offset phase)
+  int offsetPhase = (phase + 255) % 765; // Offset by 255
+  if (offsetPhase < 255) { 
+    r2 = 255 - offsetPhase; g2 = offsetPhase; b2 = 0; 
+  } else if (offsetPhase < 510) { 
+    r2 = 0; g2 = 510 - offsetPhase; b2 = offsetPhase - 255; 
+  } else { 
+    r2 = offsetPhase - 510; g2 = 0; b2 = 765 - offsetPhase; 
+  }
+
+  delay(10);
+  fade_evt = true; // Signal that the fade is complete
+}
+
+void setLEDColor(int color) {
+  switch (color) {
+    case 1: // Green
+      analogWrite(LEDrot_1, 0); analogWrite(LEDgruen_1, 255); analogWrite(LEDblau_1, 0);
+      analogWrite(LEDrot_2, 0); analogWrite(LEDgruen_2, 255); analogWrite(LEDblau_2, 0);
+      break;
+
+    case 2: // Blue
+      analogWrite(LEDrot_1, 0); analogWrite(LEDgruen_1, 0); analogWrite(LEDblau_1, 255);
+      analogWrite(LEDrot_2, 0); analogWrite(LEDgruen_2, 0); analogWrite(LEDblau_2, 255);
+      break;
+
+    case 3: // Red
+      analogWrite(LEDrot_1, 255); analogWrite(LEDgruen_1, 0); analogWrite(LEDblau_1, 0);
+      analogWrite(LEDrot_2, 255); analogWrite(LEDgruen_2, 0); analogWrite(LEDblau_2, 0);
+      break;
+    default: // Turn off LEDs
+      analogWrite(LEDrot_1, 0); analogWrite(LEDgruen_1, 0); analogWrite(LEDblau_1, 0);
+      analogWrite(LEDrot_2, 0); analogWrite(LEDgruen_2, 0); analogWrite(LEDblau_2, 0);
+      break;
+  }
+}
+
+// ---------------------------------------- Sleep Timer
+
+void startSleepTimer(int minutes) {
+  Serial.println("SleepTimer set to: " +  String(minutes) + " minutes");
+  interval = minutes * 60 * 1000UL;
+  startTime = millis();
+  timerActive = true;
+  sleep_evt = false;
+}
+
+void stopSleepTimer() {
+  Serial.println("SleepTimer deactivated");
+  interval = 0;
+  startTime = 0;
+  timerActive = false;
+  sleep_evt = false;
 }
