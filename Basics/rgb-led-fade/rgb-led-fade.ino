@@ -167,7 +167,7 @@ void button_ISR() {
   static unsigned long lastInterruptTime = 0;
   unsigned long interruptTime = millis();
 
-  if ((interruptTime - lastInterruptTime) > 100) {
+  if ((interruptTime - lastInterruptTime) > 200) {
     btn_counter++;
     btn_counter = btn_counter % 5;
     btn_evt = true;
